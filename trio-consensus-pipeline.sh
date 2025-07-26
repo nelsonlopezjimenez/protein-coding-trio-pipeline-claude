@@ -338,46 +338,45 @@ generate_gene_hashes() {
     
     log "Generating SHA-256 hashes for gene sequences"
     
-    # Create CSV header
-    echo "chromosome,sample,haplotype,gene_id,gene_length,gene_strand,raw_length,clean_length,sha256_hash" > "$final_output"
+    # Create CSV header (recommended format)
+    echo "sample,haplotype,gene_id,chromosome,sequence_length,sha256_hash" > "$final_output"
     
     for sample in "$FATHER_ID" "$MOTHER_ID" "$CHILD_ID"; do
         for hap in hap1 hap2; do
             local genes_fa="${output_dir}/${sample}_${CHROMOSOME}_${hap}_genes.fa"
             
+            # Convert sample ID to human-readable label
+            local sample_label
+            case "$sample" in
+                "$FATHER_ID") sample_label="father" ;;
+                "$MOTHER_ID") sample_label="mother" ;;
+                "$CHILD_ID") sample_label="child" ;;
+                *) sample_label="$sample" ;;
+            esac
+            
             if [[ -f "$genes_fa" && -s "$genes_fa" ]]; then
-                log "Hashing ${sample}_${hap} genes"
+                log "Hashing ${sample_label}_${hap} genes"
                 
-                # Process FASTA and generate hashes
-                awk -v chr="$CHROMOSOME" -v sample="$sample" -v hap="$hap" '
+                # Process FASTA and generate hashes (recommended format)
+                awk -v chr="$CHROMOSOME" -v sample="$sample_label" -v hap="$hap" '
                 /^>/ {
                     if (gene_id && sequence) {
-                        # Parse gene info from header
-                        split(gene_info, parts, ":")
-                        gene_length = parts[3] - parts[2] + 1
-                        gene_strand = parts[4] ? parts[4] : "+"
-                        
                         # Clean sequence
-                        raw_len = length(sequence)
                         gsub(/[-N]/, "", sequence)
                         sequence = toupper(sequence)
                         clean_len = length(sequence)
                         
                         if (clean_len > 0) {
-                            printf "%s,%s,%s,%s,%d,%s,%d,%d,%s\n", 
-                                chr, sample, hap, gene_id, gene_length, gene_strand, 
-                                raw_len, clean_len, sequence
+                            print sample "," hap "," gene_id "," chr "," clean_len "," sequence
                         }
                     }
                     
-                    # Parse new header: >gene_id::chr:start-end or >gene_id
+                    # Parse new header: >gene_id or >gene_id::chr:start-end
                     gene_line = substr($0, 2)
                     if (match(gene_line, /^([^:]+)::/)) {
                         gene_id = substr(gene_line, 1, RLENGTH-2)
-                        gene_info = substr(gene_line, RLENGTH+1)
                     } else {
                         gene_id = gene_line
-                        gene_info = ""
                     }
                     sequence = ""
                     next
@@ -385,31 +384,24 @@ generate_gene_hashes() {
                 {sequence = sequence $0}
                 END {
                     if (gene_id && sequence) {
-                        split(gene_info, parts, ":")
-                        gene_length = parts[3] - parts[2] + 1
-                        gene_strand = parts[4] ? parts[4] : "+"
-                        
-                        raw_len = length(sequence)
                         gsub(/[-N]/, "", sequence)
                         sequence = toupper(sequence)
                         clean_len = length(sequence)
                         
                         if (clean_len > 0) {
-                            printf "%s,%s,%s,%s,%d,%s,%d,%d,%s\n", 
-                                chr, sample, hap, gene_id, gene_length, gene_strand, 
-                                raw_len, clean_len, sequence
+                            print sample "," hap "," gene_id "," chr "," clean_len "," sequence
                         }
                     }
                 }' "$genes_fa" | \
-                while IFS=',' read -r chr sample hap gene_id gene_length gene_strand raw_len clean_len sequence; do
+                while IFS=',' read -r sample hap gene_id chr clean_len sequence; do
                     if [[ -n "$sequence" ]]; then
                         hash=$(echo -n "$sequence" | sha256sum | cut -d' ' -f1)
-                        echo "$chr,$sample,$hap,$gene_id,$gene_length,$gene_strand,$raw_len,$clean_len,$hash"
+                        echo "$sample,$hap,$gene_id,$chr,$clean_len,$hash"
                     fi
                 done >> "$final_output"
                 
             else
-                log "WARNING: No gene sequences found for ${sample}_${hap}"
+                log "WARNING: No gene sequences found for ${sample_label}_${hap}"
             fi
         done
     done
