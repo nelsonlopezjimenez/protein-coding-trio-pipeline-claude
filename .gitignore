@@ -1,0 +1,35 @@
+cat > .gitignore << 'EOF'
+# Large data files
+*.fa
+*.fa.fai
+*.vcf.gz
+*.vcf.gz.tbi
+*.vcf.gz.csi
+*.gtf
+*.gff3
+
+# Results and temporary files
+results/
+trio_analysis/
+*.log
+temp/
+
+# System files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# Compressed files
+*.tar.gz
+*.zip
+*.bz2
+
+# But keep example/small files
+!data/examples/*.fa
+!data/examples/*.vcf
+
+
+# mine
+*.gz
