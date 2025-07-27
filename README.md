@@ -145,3 +145,15 @@ mother,hap1,GENE001,1500,c3d4e5f6a1b2...
 mother,hap2,GENE001,1497,d4e5f6a1b2c3...
 child,hap1,GENE001,1500,a1b2c3d4e5f6...
 child,hap2,GENE001,1503,b2c3d4e5f6a1...
+
+## Alternatives
+1. # Replace ftp:// with https://
+https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage/working/20201028_3202_raw_GT_with_annot/20201028_CCDG_14151_B01_GRM_WGS_2020-08-05_chr22.recalibrated_variants.vcf.gz
+1. # 1000 Genomes on AWS
+https://s3.amazonaws.com/1000genomes/release/20130502/ALL.chr22.phase3_shapeit2_mvncall_integrated_v5b.20130502.genotypes.vcf.gz
+1. # 1000 Genomes on Google Cloud
+gsutil cp gs://genomics-public-data/1000-genomes/vcf/ALL.chr22.phase3_shapeit2_mvncall_integrated_v5b.20130502.genotypes.vcf.gz .
+1. # Small test VCF with trio data
+wget https://github.com/samtools/bcftools/raw/develop/test/trio.vcf
+1. # Phase 3 HTTPS (Fallback)
+https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/release/20130502/ALL.chr22.phase3_shapeit2_mvncall_integrated_v5b.20130502.genotypes.vcf.gz
