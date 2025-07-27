@@ -37,26 +37,92 @@ setup_1000g_analysis() {
     mkdir -p "$WORK_DIR"
     cd "$WORK_DIR"
     
-    # Download reference genome (chromosome 22 only for quick start)
-    log "Downloading reference genome (chr22)..."
-    if [[ ! -f "chr22.fa" ]]; then
-        log "  Fetching GRCh38 chromosome 22 reference..."
-        wget -O chr22.fa.gz "https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/technical/reference/GRCh38_reference_genome/chr22.fa.gz"
-        
-        log "  Extracting reference..."
-        gunzip chr22.fa.gz
-        
-        log "  Indexing reference..."
-        samtools faidx chr22.fa
-        
-        log "  Reference genome ready: $(wc -c < chr22.fa) bytes"
-    else
-        log "  Reference genome already exists"
+    # Use existing GRCh38 reference file
+    log "Setting up reference genome..."
+    
+    # Prompt user for their GRCh38 file location
+    if [[ -z "${GRCH38_REF:-}" ]]; then
+        echo
+        echo "Please provide the path to your GRCh38 reference file:"
+        echo "Examples:"
+        echo "  /path/to/GRCh38.fa"
+        echo "  /path/to/hg38.fa.gz"
+        echo "  /path/to/Homo_sapiens.GRCh38.dna.primary_assembly.fa.gz"
+        echo
+        read -p "GRCh38 reference file path: " GRCH38_REF
     fi
     
-    # Download gene annotations
-    log "Downloading gene annotations..."
-    if [[ ! -f "gencode.v44.annotation.gff3" ]]; then
+    if [[ ! -f "$GRCH38_REF" ]]; then
+        log "ERROR: Reference file not found: $GRCH38_REF"
+        exit 1
+    fi
+    
+    log "Using reference file: $GRCH38_REF"
+    
+    # Handle compressed vs uncompressed reference
+    if [[ "$GRCH38_REF" == *.gz ]]; then
+        log "  Detected compressed reference, creating symlink..."
+        ln -sf "$GRCH38_REF" "hg38.fa.gz"
+        
+        # Check if index exists
+        if [[ -f "${GRCH38_REF}.gzi" && -f "${GRCH38_REF}.fai" ]]; then
+            log "  Using existing index files"
+            ln -sf "${GRCH38_REF}.gzi" "hg38.fa.gz.gzi"
+            ln -sf "${GRCH38_REF}.fai" "hg38.fa.gz.fai"
+        else
+            log "  Creating index for compressed reference..."
+            samtools faidx "hg38.fa.gz"
+        fi
+        REF_FILE="$WORK_DIR/hg38.fa.gz"
+    else
+        log "  Detected uncompressed reference, creating symlink..."
+        ln -sf "$GRCH38_REF" "hg38.fa"
+        
+        # Check if index exists
+        if [[ -f "${GRCH38_REF}.fai" ]]; then
+            log "  Using existing index file"
+            ln -sf "${GRCH38_REF}.fai" "hg38.fa.fai"
+        else
+            log "  Creating index..."
+            samtools faidx "hg38.fa"
+        fi
+        REF_FILE="$WORK_DIR/hg38.fa"
+    fi
+    
+    # Verify reference has chr22
+    log "  Verifying chromosome 22 is present..."
+    if samtools faidx "$REF_FILE" -l | grep -q -E "^(chr22|22)$"; then
+        log "  ✓ Chromosome 22 found in reference"
+    else
+        log "  WARNING: chr22/22 not found in reference. Available chromosomes:"
+        samtools faidx "$REF_FILE" -l | head -10
+        log "  You may need to adjust chromosome naming (chr22 vs 22)"
+    fi
+    
+    # Try multiple sources for VCF data
+    log "Downloading 1000 Genomes VCF data..."
+    if [[ ! -f "chr22_test.vcf.gz" ]]; then
+        log "  Trying HTTPS source..."
+        if wget -O chr22_test.vcf.gz "https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage/working/20201028_3202_raw_GT_with_annot/20201028_CCDG_14151_B01_GRM_WGS_2020-08-05_chr22.recalibrated_variants.vcf.gz" 2>/dev/null; then
+            log "  Successfully downloaded from HTTPS"
+        else
+            log "  HTTPS failed, trying Phase 3 data..."
+            if wget -O chr22_test.vcf.gz "https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/release/20130502/ALL.chr22.phase3_shapeit2_mvncall_integrated_v5b.20130502.genotypes.vcf.gz" 2>/dev/null; then
+                log "  Successfully downloaded Phase 3 data"
+            else
+                log "  Download failed, will use remote URL in pipeline"
+                rm -f chr22_test.vcf.gz
+            fi
+        fi
+        
+        if [[ -f "chr22_test.vcf.gz" ]]; then
+            bcftools index chr22_test.vcf.gz
+            local variant_count=$(bcftools view -H chr22_test.vcf.gz | wc -l)
+            log "  VCF ready: $variant_count variants"
+        fi
+    else
+        log "  VCF file already exists"
+    fi
         log "  Fetching GENCODE v44 annotations..."
         wget -O gencode.v44.annotation.gff3.gz "https://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_human/release_44/gencode.v44.annotation.gff3.gz"
         
@@ -77,7 +143,7 @@ setup_1000g_analysis() {
 # Generated on $(date)
 
 # Local reference files
-REF="$WORK_DIR/chr22.fa"
+REF="$REF_FILE"
 GFF="$WORK_DIR/gencode.v44.annotation.gff3"
 
 # CEU trio (Ashkenazi Jewish family)
@@ -86,8 +152,11 @@ FATHER_ID="NA12877"
 MOTHER_ID="NA12878"
 CHILD_ID="NA12882"
 
-# 1000 Genomes high-coverage VCF URL template
-VCF_URL_TEMPLATE="ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage/working/20201028_3202_raw_GT_with_annot/20201028_CCDG_14151_B01_GRM_WGS_2020-08-05_{CHR}.recalibrated_variants.vcf.gz"
+# 1000 Genomes VCF URL template (with fallbacks)
+VCF_URL_TEMPLATE="https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage/working/20201028_3202_raw_GT_with_annot/20201028_CCDG_14151_B01_GRM_WGS_2020-08-05_{CHR}.recalibrated_variants.vcf.gz"
+
+# Fallback URL for Phase 3 data if high-coverage fails
+VCF_FALLBACK_TEMPLATE="https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/release/20130502/ALL.{CHR}.phase3_shapeit2_mvncall_integrated_v5b.20130502.genotypes.vcf.gz"
 
 # Output and processing settings
 OUTPUT_DIR="$WORK_DIR/results"
@@ -140,12 +209,14 @@ Setup completed on: $(date)
 Working directory: $WORK_DIR
 
 Files created:
-- chr22.fa                    : Reference genome (chromosome 22)
-- chr22.fa.fai               : Reference index
-- gencode.v44.annotation.gff3 : Gene annotations
-- pipeline_config.conf       : Configuration file
-- run_chr22_analysis.sh      : Convenient run script
-- setup_summary.txt          : This file
+- hg38.fa (or hg38.fa.gz)       : Full GRCh38 reference genome (symlink)
+- hg38.fa.fai (or hg38.fa.gz.fai) : Reference index
+- gencode.v44.annotation.gff3   : Gene annotations
+- pipeline_config.conf          : Configuration file
+- run_chr22_analysis.sh         : Convenient run script
+- setup_summary.txt             : This file
+
+Reference source: $GRCH38_REF
 
 Trio configuration:
 - Father:  NA12877 (CEU population)
@@ -169,7 +240,7 @@ Expected output:
 - Summary statistics
 
 File sizes:
-- Reference: ~$(du -h chr22.fa 2>/dev/null | cut -f1 || echo "~50MB")
+- Reference: Full GRCh38 genome (~3.1GB)
 - Annotations: ~$(du -h gencode.v44.annotation.gff3 2>/dev/null | cut -f1 || echo "~40MB")
 - VCF download: ~47MB (downloaded automatically)
 EOF
